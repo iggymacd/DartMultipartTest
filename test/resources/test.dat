@@ -1,0 +1,455 @@
+------WebKitFormBoundaryayY4GJjHNbV0Tqn1
+Content-Disposition: form-data; name="title"
+
+gdfg
+------WebKitFormBoundaryayY4GJjHNbV0Tqn1
+Content-Disposition: form-data; name="name"
+
+fdsdfsdf
+------WebKitFormBoundaryayY4GJjHNbV0Tqn1
+Content-Disposition: form-data; name="number"
+
+gsdggf
+------WebKitFormBoundaryayY4GJjHNbV0Tqn1
+Content-Disposition: form-data; name="upload"; filename="WCBUtility.java"
+Content-Type: application/octet-stream
+
+import java.util.Calendar;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Properties;
+
+import javax.mail.BodyPart;
+import javax.mail.Message;
+import javax.mail.Multipart;
+import javax.mail.Session;
+import javax.mail.Transport;
+import javax.mail.internet.InternetAddress;
+import javax.mail.internet.MimeBodyPart;
+import javax.mail.internet.MimeMessage;
+import javax.mail.internet.MimeMultipart;
+
+import org.eclipse.persistence.sessions.UnitOfWork;
+
+import com.mitratech.teamconnect.entity.JNContEmail;
+import com.mitratech.teamconnect.entity.JNProjAssignee;
+import com.mitratech.teamconnect.entity.JNTaskAssignee;
+import com.mitratech.teamconnect.entity.TNContact;
+import com.mitratech.teamconnect.entity.TNInvolved;
+import com.mitratech.teamconnect.entity.TNProject;
+import com.mitratech.teamconnect.entity.TNTask;
+import com.mitratech.teamconnect.entity.WNObjdCategory;
+import com.mitratech.teamconnect.entity.YNGroup;
+import com.mitratech.teamconnect.entity.YNUser;
+import com.mitratech.teamconnect.entity.eof.TFTask;
+import com.mitratech.teamconnect.entity.factory.FNClientSessionManager;
+import com.mitratech.teamconnect.entity.factory.FNTaskFactory;
+import com.mitratech.teamconnect.entity.factory.FNUtility;
+import com.mitratech.teamconnect.entity.factory.GNGrupStore;
+import com.mitratech.teamconnect.entity.factory.GNUserSettingStore;
+import com.mitratech.teamconnect.foundation.HNSettingKey;
+import com.mitratech.teamconnect.foundation.TCException;
+import com.mitratech.teamconnect.foundation.TCLog;
+import com.mitratech.teamconnect.foundation.TCUtility;
+
+public class WCBUtility
+{
+
+	/**
+	 * Method Sends the email to specific email Address.
+	 * 
+	 * @param emailAddr
+	 * @param emailBody
+	 * @param emailSubject
+	 */
+
+	public static void sendEmail(String emailAddr, String emailBody, String emailSubject) {
+
+		//Get the system SMTP host
+		if (TCUtility.isStringNullOrEmpty(GNUserSettingStore.systemSettingForKey(HNSettingKey.SMTP_HOST))) {
+			log("SMTP Host address is not set. Please set SMTP Host address in Team Conenct system preferences.");
+			throw new TCException("An exception has occurred while sending E-Mail. Please contact your System Administrator.");
+		}
+		try {
+			// Get the system contact email address this will be used as from email address
+			String from = GNUserSettingStore.systemSettingForKey(HNSettingKey.TC_CONT_EMAIL_CONT_ADDRESS);
+			if (from == null) {
+				log("System email address is not set, Please set the User Setting");
+				throw new TCException("An exception has occurred while sending E-Mail. Please contact your System Administrator.");
+
+			}
+			//set the email properties
+			Properties props = new Properties();
+			props.setProperty("mail.smtp.host", GNUserSettingStore.systemSettingForKey(HNSettingKey.SMTP_HOST));
+			Session session = Session.getInstance(props, null);
+			MimeMessage msg = new MimeMessage(session);
+			InternetAddress fromAdd = new InternetAddress(from);
+
+			// set the email to sent from 
+			msg.setFrom(fromAdd);
+
+			// if main assignee email address is present send it to main assignee 
+			msg.addRecipient(Message.RecipientType.TO, new InternetAddress(emailAddr));
+
+			//set the email subject
+			msg.setSubject(emailSubject);
+			Multipart multipart = new MimeMultipart();
+			BodyPart messageBodyPart = new MimeBodyPart();
+			messageBodyPart.setText(emailBody);
+			multipart.addBodyPart(messageBodyPart);
+
+			// set the body of email
+			msg.setContent(multipart);
+
+			// set the sent date
+			msg.setSentDate(FNUtility.getNowDate().getTime());
+
+			// send the email
+			Transport.send(msg);
+
+			log("Mail Send to :: " + emailAddr);
+
+		} catch (Exception me) {
+			log("Error sending the email\n" + me.getMessage());
+			throw new TCException("An exception has occurred while sending E-Mail. Please contact your System Administrator.");
+		}
+	}
+
+	/**
+	 * This method gives us the Default Email address String for the specific Contact.
+	 * 
+	 * @param TNContact :userCont
+	 * @return String : Email address.
+	 */
+
+	@SuppressWarnings( { "unused", "unchecked" })
+	public static String getContactDefaultEmailID(TNContact userCont) {
+		List<JNContEmail> contEmailList = userCont.getEmailList();
+		for (JNContEmail email : contEmailList) {
+			if (email.isDefault()) {
+				return email.getEmailString();
+			}
+		}
+		log(userCont.getName() + " has no Email Id");
+		return null;
+	}
+
+	/**
+	 * Method returns the First Assignee of the given Tree Position from the matter AssigneeList
+	 * 
+	 * @param matter : Project
+	 * @param treePos : Assignee role
+	 * @return YNUser : Assignee User
+	 */
+
+	@SuppressWarnings("unchecked")
+	public static YNUser getFirstAssigneeOfTreePos(TNProject matter, String treePos) {
+
+		List<JNProjAssignee> matterAssignees = matter.getAssigneeList();
+
+		for (JNProjAssignee assignee : matterAssignees) {
+			if (assignee.getType().getPartialTreePosition().equals(treePos)) {
+				return assignee.getUser();
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Method creates the task for the given user as a Assignee.
+	 * 
+	 * @param matter
+	 * @param category
+	 * @param priority
+	 * @param taskAssignee 
+	 * @param subject
+	 */
+	@SuppressWarnings( { "unused", "null" })
+	public static void createTask(TNProject matter, String category, int priority, YNUser taskAssignee, String subject) {
+
+		UnitOfWork uow = FNClientSessionManager.acquireUnitOfWork();
+		taskAssignee = (YNUser) uow.registerObject(taskAssignee);
+		matter = (TNProject) uow.registerObject(matter);
+		TNTask task = FNTaskFactory.createTask(uow, subject, taskAssignee);
+		
+		List assigneeList = task.getAssigneeList();
+		
+		if (assigneeList != null && assigneeList.size() > 1 )
+		{
+			for (Iterator i = assigneeList.iterator(); i.hasNext(); )
+			{
+				JNTaskAssignee assignee = (JNTaskAssignee)i.next();
+				
+				if (assignee.getUser().getUsername().equals("system") )
+				{
+					assignee = (JNTaskAssignee)uow.registerObject(assignee);
+					
+					if (task.getForwardedByAssignee().getPrimaryKey() == assignee.getPrimaryKey())
+					{
+						((TFTask)task).setForwardedByAssigneeQ(null);
+						((TFTask)task).removeAssignee(assignee);
+					}
+					
+					break;
+				}
+			}
+		}
+		
+		task.setProject(matter);
+		task.setPriorityIID(priority);
+		task.setDefaultCategory(category);
+		task.setDueOn(FNUtility.getNowDate());
+		if (uow != null || uow.isActive()) {
+			FNClientSessionManager.commit(uow);
+		}
+		log("Created Task :: " + taskAssignee.getDisplayString());
+	}
+
+	/**
+	 * Methdo creates the Task for the given user as task Assignee and specific Start and Due Date.
+	 * 
+	 * @param matter
+	 * @param category
+	 * @param priority
+	 * @param taskAssignee
+	 * @param subject
+	 * @param startDate
+	 * @param dueDate
+	 */
+	@SuppressWarnings( { "unused", "null" })
+	public static void createTask(TNProject matter, String category, int priority, YNUser taskAssignee, String subject, Calendar startDate,
+			Calendar dueDate) {
+
+		UnitOfWork uow = FNClientSessionManager.acquireUnitOfWork();
+
+		taskAssignee = (YNUser) uow.registerObject(taskAssignee);
+
+		matter = (TNProject) uow.registerObject(matter);		
+		TNTask task = FNTaskFactory.createTask(uow, subject, taskAssignee);
+		
+		
+		List assigneeList = task.getAssigneeList();
+		
+		if (assigneeList != null && assigneeList.size() > 1 )
+		{
+			for (Iterator i = assigneeList.iterator(); i.hasNext(); )
+			{
+				JNTaskAssignee assignee = (JNTaskAssignee)i.next();
+				
+				if (assignee.getUser().getUsername().equals("system") )
+				{
+					assignee = (JNTaskAssignee)uow.registerObject(assignee);
+					
+					if (task.getForwardedByAssignee().getPrimaryKey() == assignee.getPrimaryKey())
+					{
+						((TFTask)task).setForwardedByAssigneeQ(null);
+						((TFTask)task).removeAssignee(assignee);
+					}
+					
+					break;
+				}
+			}
+		}
+		
+		
+		task.setProject(matter);
+		task.setPriorityIID(priority);
+		task.setDefaultCategory(category);
+
+		if (dueDate != null) {
+			task.setDueOn(dueDate);
+		}
+		if (startDate != null) {
+			task.setStartOn(startDate);
+		}
+
+		if (uow != null || uow.isActive()) {
+			FNClientSessionManager.commit(uow);
+		}
+	}
+
+	/**
+	 * Methdo checks the difference of the given Date with the current Date for the specific Days and return
+	 * true/false.
+	 * 
+	 * @param cal
+	 * @param days
+	 * @return
+	 */
+	@SuppressWarnings("unused")
+	public static boolean checkWithCurrentDate(Calendar cal, int days) {
+
+		Calendar copyOfSent = (Calendar) cal.clone();
+
+		copyOfSent.add(Calendar.DAY_OF_YEAR, days);
+
+		Calendar todayDate = FNUtility.getBeginOfTodayDate();
+
+		if (copyOfSent.get(Calendar.DAY_OF_MONTH) == todayDate.get(Calendar.DAY_OF_MONTH)
+
+				&& copyOfSent.get(Calendar.MONTH) == todayDate.get(Calendar.MONTH)
+
+				&& copyOfSent.get(Calendar.YEAR) == todayDate.get(Calendar.YEAR)) {
+
+			log(days + " : true");
+
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Method checks whether the given category is added in the Project or not.
+	 * 
+	 * @param matter
+	 * @param treePosition
+	 * @return
+	 */
+	@SuppressWarnings("unchecked")
+	public static boolean isCategoryExist(TNProject matter, String treePosition) {
+		List<WNObjdCategory> categoryList = matter.getCategoryList();
+		for (WNObjdCategory category : categoryList) {
+			if (category.getTreePosition().equals(treePosition)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Method checks whther the given category is added for the given Involved record or not.
+	 * 
+	 * @param involved
+	 * @param treePosition
+	 * @return
+	 */
+	@SuppressWarnings("unchecked")
+	public static boolean isCategoryExist(TNInvolved involved, String treePosition) {
+		List<WNObjdCategory> categoryList = involved.getCategoryList();
+		for (WNObjdCategory category : categoryList) {
+			if (category.getTreePosition().equals(treePosition)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Method creates the Task for the group members using unique key
+	 * 
+	 * @param groupKey
+	 * @param matter
+	 * @param category
+	 * @param priority
+	 * @param subject
+	 */
+	@SuppressWarnings("unchecked")
+	public static void createTaskToAllMembersOfGroupKey(String unigueKey, TNProject matter, String category, int priority, String subject) {
+
+		YNGroup group = GNGrupStore.getGroupForKey(unigueKey);
+		log("Group == " + group);
+
+		if (group == null) {
+			log(unigueKey + "is not exist.");
+			return;
+		}
+
+		List<YNUser> usersList = GNGrupStore.getUserList(group);
+		for (YNUser user : usersList) {
+			createTask(matter, category, priority, user, subject);
+		}
+	}
+
+	/**
+	 * Method creates the Task for the group members using unique key and for the Main Assignee of the matter
+	 * also.
+	 * 
+	 * @param groupKey
+	 * @param matter
+	 * @param category
+	 * @param priority
+	 * @param subject
+	 */
+	@SuppressWarnings("unchecked")
+	public static void createTaskToGroupandMainAssignee(String unigueKey, TNProject matter, String category, int priority, String subject,
+			boolean wantToCreateMainAssignee) {
+
+		YNGroup group = GNGrupStore.getGroupForKey(unigueKey);
+		log("Group == " + group);
+
+		if (group == null) {
+			log(unigueKey + "is not exist.");
+			return;
+		}
+
+
+
+		YNUser mainAssigneeUser = matter.getMainAssigneeUser();
+
+		log("The main assignee user is : " + mainAssigneeUser.getUsername());
+
+		if (mainAssigneeUser != null && wantToCreateMainAssignee) {
+			createTask(matter, category, priority, mainAssigneeUser, subject);
+			log("Created task for main assignee : " + mainAssigneeUser.getUsername());
+		}
+
+		List<YNUser> usersList = GNGrupStore.getUserList(group);
+
+		log("The group member list size is  :" + usersList.size());
+
+		for (YNUser user : usersList) {
+
+			if (user.getPrimaryKey() != mainAssigneeUser.getPrimaryKey()) {
+
+				createTask(matter, category, priority, user, subject);
+				log("Created task for user : " + user.getUsername());
+			}
+		} 
+	}
+
+	/**
+	 * Method sends the Email for the group members using unique key.
+	 * 
+	 * @param groupKey
+	 * @param subject
+	 * @param body
+	 */
+
+	public static void sendMailToGroup(String groupKey, String subject, String body) {
+		JNContEmail contEmail = null;
+		String emailID = null;
+		YNGroup group = GNGrupStore.getGroupForKey(groupKey);
+		log("Group == " + group);
+
+		if (group == null) {
+			log("Group with " + groupKey + "is not exist.");
+			return;
+		}
+
+		List<YNUser> usersList = GNGrupStore.getUserList(group);
+		for (YNUser user : usersList) {
+			TNContact contact = user.getContact();
+			contEmail = contact.getDefaultEmail();
+			if (contEmail != null) {
+				emailID = contEmail.getEmailString();
+				sendEmail(emailID, body, subject);
+			}
+		}
+	}
+
+	/**
+	 * Method creates the log entries 
+	 * 
+	 * @param msg
+	 */ 
+
+	public static void log(String msg) {
+
+		if (TCLog.getRuleLogger().isDebugEnabled()) 
+			TCLog.getRuleLogger().debug(msg); 
+
+	}
+}
+------WebKitFormBoundaryayY4GJjHNbV0Tqn1--
